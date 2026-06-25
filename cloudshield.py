@@ -141,6 +141,7 @@ class CloudShieldGateway:
         print(f"[+] Security gate completed. Full report compiled in: {report_path}")
 
 if __name__ == "__main__":
+    gateway.audit_kubernetes_manifest("deployment.yaml")
     gateway = CloudShieldGateway()
     gateway.audit_container_manifest("Dockerfile")
     gateway.audit_cloud_infrastructure("cloud_deployment.json")
