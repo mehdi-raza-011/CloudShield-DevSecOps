@@ -1,18 +1,30 @@
 import os
 import json
 import re
+import subprocess
 from datetime import datetime
 
 class CloudShieldGateway:
     def __init__(self):
         self.compliance_violations = []
         self.hardened_iam_policies = {}
+        
         # Kubernetes scanning patterns
         self.k8s_privileged = re.compile(r"privileged:\s*true", re.IGNORECASE)
         self.k8s_host_network = re.compile(r"hostNetwork:\s*true", re.IGNORECASE)
-        # Compiled scanning patterns for deep container inspection
+        
+        # Container & Secrets scanning patterns
         self.secret_patterns = re.compile(r"(password|passwd|secret|key|token|api_key)\s*=\s*", re.IGNORECASE)
         self.root_user_pattern = re.compile(r"^USER\s+root", re.IGNORECASE)
+
+    def get_git_metadata(self):
+        """Extracts current git environment properties."""
+        try:
+            branch = subprocess.check_output(["git", "branch", "--show-current"], stderr=subprocess.DEVNULL).decode().strip()
+            last_commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+            return f"Branch: `{branch}` | Last Commit Hash: `{last_commit}`"
+        except:
+            return "Git Environment: Development Active"
 
     # MODULE 1: DEVSECOPS CONTAINER HARDENING SCANNER
     def audit_container_manifest(self, dockerfile_path):
@@ -42,7 +54,8 @@ class CloudShieldGateway:
             self.register_violation("HIGH", "Container Hardening", dockerfile_path, "EOF",
                 "Missing explicit non-root USER instruction. Container will default to root execution.")
             
-            def audit_kubernetes_manifest(self, yaml_path):
+    # MODULE 2: KUBERNETES MANIFEST SCANNER
+    def audit_kubernetes_manifest(self, yaml_path):
         print(f"[+] Launching Kubernetes Cluster Scan: {yaml_path}")
         if not os.path.exists(yaml_path):
             return
@@ -51,7 +64,7 @@ class CloudShieldGateway:
             for line_num, line in enumerate(f, 1):
                 clean_line = line.strip()
                 
-                # Check 1: Prevent pods from running in privileged mode (Root access to host)
+                # Check 1: Prevent pods from running in privileged mode
                 if self.k8s_privileged.search(clean_line):
                     self.register_violation("CRITICAL", "Kubernetes Security", yaml_path, line_num,
                         "Pod is configured with 'privileged: true'. This allows container escape attacks.")
@@ -61,7 +74,7 @@ class CloudShieldGateway:
                     self.register_violation("HIGH", "Kubernetes Networking", yaml_path, line_num,
                         "Pod is binding to hostNetwork. This bypasses network isolation.")
 
-    # MODULE 2: CLOUD POSTURE & AUTOMATED IAM REMEDIATION
+    # MODULE 3: CLOUD POSTURE & AUTOMATED IAM REMEDIATION
     def audit_cloud_infrastructure(self, cloud_json_path):
         print(f"[+] Launching Infrastructure-as-Code (IaC) Scan: {cloud_json_path}")
         if not os.path.exists(cloud_json_path):
@@ -77,21 +90,19 @@ class CloudShieldGateway:
                     self.register_violation("HIGH", "Network Security", sg["group_name"], f"Port {rule['port']}",
                         f"Management port {rule['port']} is globally exposed to the public internet.")
 
-        # Audit Identity Management (IAM) & Apply Automated Least-Privilege Remediation
+        # Audit Identity Management (IAM)
         for policy in config.get("iam_policies", []):
             policy_name = policy["policy_name"]
-            statements = policy["statements"]
             is_vulnerable = False
             
-            for stmt in statements:
+            for stmt in policy.get("statements", []):
                 if "*" in stmt.get("actions", []) and "*" in stmt.get("resources", []):
                     self.register_violation("CRITICAL", "Identity & Access Management", policy_name, "IAM Statement",
                         f"Dangerous administrative wildcard access granted on all cloud assets.")
                     is_vulnerable = True
 
-            # AUTOMATED REMEDIATION ENGINE: Rewrite over-permissive policies automatically
+            # AUTOMATED REMEDIATION ENGINE
             if is_vulnerable:
-                print(f" [!] Initiating Automated Remediation Engine for policy: {policy_name}")
                 self.hardened_iam_policies[policy_name] = {
                     "remediation_status": "HARDENED_TO_LEAST_PRIVILEGE",
                     "original_policy": policy_name,
@@ -114,16 +125,38 @@ class CloudShieldGateway:
             "description": desc
         }
         self.compliance_violations.append(violation)
-        print(f"  [-] RISK DETECTED [{severity}] inside {category} ({resource} @ Line/Asset {location})")
 
-    # MODULE 3: COMPLIANCE LEDGER GENERATION
+    # NEW FEATURE: TERMINAL DASHBOARD
+    def print_summary_dashboard(self):
+        """Prints a professional ASCII summary table to the terminal."""
+        critical = sum(1 for v in self.compliance_violations if v['severity'] == 'CRITICAL')
+        high = sum(1 for v in self.compliance_violations if v['severity'] == 'HIGH')
+        
+        print("\n" + "="*55)
+        print(" 🛡️  CLOUDSHIELD DEVSECOPS SECURITY SUMMARY")
+        print("="*55)
+        print(f"  [CRITICAL RISKS] : {critical}")
+        print(f"  [HIGH RISKS]     : {high}")
+        print("-" * 55)
+        if critical > 0 or high > 0:
+            print("  STATUS: 🔴 PIPELINE REJECTED")
+        else:
+            print("  STATUS: 🟢 PIPELINE SECURE")
+        print("="*55 + "\n")
+
+    # MODULE 4: COMPLIANCE LEDGER GENERATION & GIT LOGIC
     def generate_gate_reports(self):
-        # 1. Output the compiled security findings
+        self.print_summary_dashboard()
+        
         report_path = "pipeline_compliance_report.md"
+        git_info = self.get_git_metadata()
+        gate_passed = len(self.compliance_violations) == 0
+        
         with open(report_path, 'w') as f:
             f.write("# DevSecOps Pipeline Security Gate Report\n")
             f.write(f"**Scan Timestamp:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  \n")
-            f.write(f"**Gate Status:** {'REJECTED' if self.compliance_violations else 'PASSED'}  \n\n")
+            f.write(f"**Git Tracking Status:** {git_info}  \n")
+            f.write(f"**Gate Status:** {'🟢 PASSED' if gate_passed else '🔴 REJECTED'}  \n\n")
             
             f.write("## Security Risk Findings Ledger\n")
             for v in self.compliance_violations:
@@ -131,18 +164,33 @@ class CloudShieldGateway:
                 f.write(f"* **Target Asset:** `{v['resource']}` (Location: `{v['location']}`)\n")
                 f.write(f"* **Violation Details:** {v['description']}\n\n")
 
-        # 2. Output the automatically remediated configurations
+        # Output the machine-readable JSON artifact
+        json_report_path = "cloudshield_results.json"
+        with open(json_report_path, 'w') as f:
+            json.dump({
+                "metadata": {"timestamp": datetime.now().isoformat(), "git_context": git_info},
+                "total_violations": len(self.compliance_violations),
+                "findings": self.compliance_violations
+            }, f, indent=2)
+
+        # Output remediated configurations
         if self.hardened_iam_policies:
             remediation_path = "remediated_iam_blueprints.json"
             with open(remediation_path, 'w') as f:
                 json.dump(self.hardened_iam_policies, f, indent=2)
-            print(f"\n[+] Remediation complete. Hardened structures written to: {remediation_path}")
-            
-        print(f"[+] Security gate completed. Full report compiled in: {report_path}")
+                
+        # Git Commit Blocking Logic
+        critical_count = sum(1 for v in self.compliance_violations if v['severity'] in ['HIGH', 'CRITICAL'])
+        if critical_count > 0:
+            print(f"[!] {critical_count} CRITICAL/HIGH violations found. Aborting commit sequence.")
+            exit(1)
+        else:
+            print("[+] Environment clean. Commit authorized.")
+            exit(0)
 
 if __name__ == "__main__":
-    gateway.audit_kubernetes_manifest("deployment.yaml")
     gateway = CloudShieldGateway()
     gateway.audit_container_manifest("Dockerfile")
+    gateway.audit_kubernetes_manifest("deployment.yaml")
     gateway.audit_cloud_infrastructure("cloud_deployment.json")
     gateway.generate_gate_reports()
