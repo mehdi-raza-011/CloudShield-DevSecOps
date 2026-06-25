@@ -41,6 +41,25 @@ class CloudShieldGateway:
         if not has_user_instruction:
             self.register_violation("HIGH", "Container Hardening", dockerfile_path, "EOF",
                 "Missing explicit non-root USER instruction. Container will default to root execution.")
+            
+            def audit_kubernetes_manifest(self, yaml_path):
+        print(f"[+] Launching Kubernetes Cluster Scan: {yaml_path}")
+        if not os.path.exists(yaml_path):
+            return
+
+        with open(yaml_path, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                clean_line = line.strip()
+                
+                # Check 1: Prevent pods from running in privileged mode (Root access to host)
+                if self.k8s_privileged.search(clean_line):
+                    self.register_violation("CRITICAL", "Kubernetes Security", yaml_path, line_num,
+                        "Pod is configured with 'privileged: true'. This allows container escape attacks.")
+                
+                # Check 2: Prevent pods from binding to the host's network
+                if self.k8s_host_network.search(clean_line):
+                    self.register_violation("HIGH", "Kubernetes Networking", yaml_path, line_num,
+                        "Pod is binding to hostNetwork. This bypasses network isolation.")
 
     # MODULE 2: CLOUD POSTURE & AUTOMATED IAM REMEDIATION
     def audit_cloud_infrastructure(self, cloud_json_path):
