@@ -7,7 +7,9 @@ class CloudShieldGateway:
     def __init__(self):
         self.compliance_violations = []
         self.hardened_iam_policies = {}
-        
+        # Kubernetes scanning patterns
+        self.k8s_privileged = re.compile(r"privileged:\s*true", re.IGNORECASE)
+        self.k8s_host_network = re.compile(r"hostNetwork:\s*true", re.IGNORECASE)
         # Compiled scanning patterns for deep container inspection
         self.secret_patterns = re.compile(r"(password|passwd|secret|key|token|api_key)\s*=\s*", re.IGNORECASE)
         self.root_user_pattern = re.compile(r"^USER\s+root", re.IGNORECASE)
